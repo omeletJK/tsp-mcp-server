@@ -9,6 +9,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { TSPSolver, City, TSPResult } from './tsp-solver.js';
+import { TSPVisualizer, VisualizationOptions } from './visualization.js';
 
 interface NamedCity extends City {
   name: string;
@@ -139,6 +140,121 @@ class TSPMCPServer {
             },
             required: ['cities', 'route']
           }
+        },
+        {
+          name: 'visualize_tsp_route',
+          description: 'Generate an SVG visualization of a TSP route. Cities are shown as red dots, routes as blue lines.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              cities: {
+                type: 'array',
+                description: 'Array of cities with x and y coordinates',
+                items: {
+                  type: 'object',
+                  properties: {
+                    x: {
+                      type: 'number',
+                      description: 'X coordinate of the city'
+                    },
+                    y: {
+                      type: 'number',
+                      description: 'Y coordinate of the city'
+                    },
+                    name: {
+                      type: 'string',
+                      description: 'Optional name of the city'
+                    }
+                  },
+                  required: ['x', 'y']
+                }
+              },
+              route: {
+                type: 'array',
+                description: 'Array of city indices representing the route order',
+                items: {
+                  type: 'number'
+                }
+              },
+              options: {
+                type: 'object',
+                description: 'Optional visualization settings',
+                properties: {
+                  width: {
+                    type: 'number',
+                    description: 'SVG width in pixels (default: 800)'
+                  },
+                  height: {
+                    type: 'number',
+                    description: 'SVG height in pixels (default: 600)'
+                  },
+                  showLabels: {
+                    type: 'boolean',
+                    description: 'Whether to show city labels (default: true)'
+                  },
+                  showDistance: {
+                    type: 'boolean',
+                    description: 'Whether to show total distance (default: true)'
+                  }
+                }
+              }
+            },
+            required: ['cities', 'route']
+          }
+        },
+        {
+          name: 'solve_and_visualize_tsp',
+          description: 'Solve TSP and generate an SVG visualization in one step. Returns both the solution and the visualization.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              cities: {
+                type: 'array',
+                description: 'Array of cities with x and y coordinates',
+                items: {
+                  type: 'object',
+                  properties: {
+                    x: {
+                      type: 'number',
+                      description: 'X coordinate of the city'
+                    },
+                    y: {
+                      type: 'number',
+                      description: 'Y coordinate of the city'
+                    },
+                    name: {
+                      type: 'string',
+                      description: 'Optional name of the city'
+                    }
+                  },
+                  required: ['x', 'y']
+                }
+              },
+              options: {
+                type: 'object',
+                description: 'Optional visualization settings',
+                properties: {
+                  width: {
+                    type: 'number',
+                    description: 'SVG width in pixels (default: 800)'
+                  },
+                  height: {
+                    type: 'number',
+                    description: 'SVG height in pixels (default: 600)'
+                  },
+                  showLabels: {
+                    type: 'boolean',
+                    description: 'Whether to show city labels (default: true)'
+                  },
+                  showDistance: {
+                    type: 'boolean',
+                    description: 'Whether to show total distance (default: true)'
+                  }
+                }
+              }
+            },
+            required: ['cities']
+          }
         }
       ]
     }));
@@ -156,6 +272,12 @@ class TSPMCPServer {
           
           case 'calculate_route_distance':
             return await this.handleCalculateRouteDistance(args);
+
+          case 'visualize_tsp_route':
+            return await this.handleVisualizeTSPRoute(args);
+
+          case 'solve_and_visualize_tsp':
+            return await this.handleSolveAndVisualizeTSP(args);
 
           default:
             throw new McpError(
@@ -339,6 +461,140 @@ ${route.map((cityIndex, i) => {
   );
   return `${i + 1}. City ${cityIndex} → City ${nextCityIndex}: ${segmentDistance.toFixed(2)} units`;
 }).join('\n')}`,
+        }
+      ]
+    };
+  }
+
+  private async handleVisualizeTSPRoute(args: any) {
+    if (!args.cities || !Array.isArray(args.cities)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Cities must be provided as an array'
+      );
+    }
+
+    if (!args.route || !Array.isArray(args.route)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Route must be provided as an array of city indices'
+      );
+    }
+
+    const cities: (City & { name?: string })[] = args.cities.map((city: any, index: number) => {
+      if (typeof city.x !== 'number' || typeof city.y !== 'number') {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `City at index ${index} must have numeric x and y coordinates`
+        );
+      }
+      return { 
+        x: city.x, 
+        y: city.y, 
+        name: city.name || `City ${index}` 
+      };
+    });
+
+    const route: number[] = args.route;
+
+    // Validate route indices
+    for (const cityIndex of route) {
+      if (cityIndex < 0 || cityIndex >= cities.length) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Invalid city index ${cityIndex} in route`
+        );
+      }
+    }
+
+    const visualizer = new TSPVisualizer();
+    const totalDistance = TSPVisualizer.calculateRouteDistance(cities, route);
+    const svgVisualization = visualizer.generateSVG(cities, route, totalDistance, args.options);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `📊 **TSP Route Visualization**
+
+🗺️  Route: ${route.join(' → ')} → ${route[0]}
+📏 Total Distance: ${totalDistance.toFixed(2)} units
+📍 Cities: ${cities.length}
+
+The visualization shows:
+- 🔴 Red circles: Cities with index numbers
+- 🔵 Blue lines: Route connections
+- 📝 Labels: City names and visit order`
+        },
+        {
+          type: 'text',
+          text: svgVisualization
+        }
+      ]
+    };
+  }
+
+  private async handleSolveAndVisualizeTSP(args: any) {
+    if (!args.cities || !Array.isArray(args.cities)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Cities must be provided as an array'
+      );
+    }
+
+    const cities: (City & { name?: string })[] = args.cities.map((city: any, index: number) => {
+      if (typeof city.x !== 'number' || typeof city.y !== 'number') {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `City at index ${index} must have numeric x and y coordinates`
+        );
+      }
+      return { 
+        x: city.x, 
+        y: city.y, 
+        name: city.name || `City ${index}` 
+      };
+    });
+
+    if (cities.length < 2) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'At least 2 cities are required to solve TSP'
+      );
+    }
+
+    const solver = new TSPSolver(cities);
+    const result = solver.solve();
+
+    const visualizer = new TSPVisualizer();
+    const svgVisualization = visualizer.generateSVG(cities, result.route, result.totalDistance, args.options);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `🎯 **TSP Solution Found!**
+
+📍 Number of cities: ${cities.length}
+🗺️  Optimal route: ${result.route.join(' → ')} → ${result.route[0]}
+📏 Total distance: ${result.totalDistance.toFixed(2)} units
+
+🏙️ **Route Details:**
+${result.route.map((cityIndex, i) => {
+  const city = cities[cityIndex];
+  return `${i + 1}. ${city.name}: (${city.x}, ${city.y})`;
+}).join('\n')}
+
+🧠 **Algorithm used:** ${cities.length <= 10 ? 'Dynamic Programming (optimal solution)' : 'Nearest Neighbor + 2-opt (high-quality heuristic)'}
+
+📊 **Visualization below shows:**
+- 🔴 Red circles: Cities with index numbers  
+- 🔵 Blue lines: Optimal route connections
+- 📝 Labels: City names and visit order`
+        },
+        {
+          type: 'text',
+          text: svgVisualization
         }
       ]
     };
