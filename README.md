@@ -9,6 +9,8 @@ A Model Context Protocol (MCP) server for solving the Traveling Salesman Problem
 - 🏙️ **Named Cities**: Support for both coordinate-only and named city inputs
 - 📏 **Distance Calculation**: Calculate distances for custom routes
 - 🔄 **Multiple Starting Points**: Tests multiple starting points to find better solutions
+- 📊 **Visual Representations**: Generate beautiful SVG visualizations of TSP routes and solutions
+- 🎨 **Customizable Visualizations**: Adjustable canvas size, colors, labels, and styling options
 
 ## Installation
 
@@ -122,9 +124,25 @@ What's the shortest route to visit all cities and return to the starting point?"
 Cities are at: (0,0), (1,2), (3,1), (2,4), (4,3)"
 ```
 
+### 🎨 **NEW! Visual TSP Solutions**
+
+```
+"Solve the TSP for these 4 cities and show me a visual diagram: 
+(0,0), (5,3), (2,7), (8,1)"
+```
+
+```
+"Create a visualization of this route through Seoul, Busan, and Incheon with custom styling"
+```
+
+```
+"Show me a 1000x800 pixel visualization of the optimal route through these delivery points, 
+with labels but without distance information"
+```
+
 ## Available Tools
 
-The server provides three main tools:
+The server provides five powerful tools:
 
 ### 1. `solve_tsp`
 Solves TSP for cities with x,y coordinates.
@@ -166,6 +184,62 @@ Calculates the total distance for a specific route.
     {"x": 3, "y": 1}
   ],
   "route": [0, 2, 1]
+}
+```
+
+### 4. 🎨 `visualize_tsp_route` **NEW!**
+Generates an SVG visualization of a TSP route with customizable styling.
+
+**Features:**
+- 🔴 Red circles for cities with index numbers
+- 🔵 Blue lines for route connections  
+- 📝 City labels with visit order
+- 📏 Total distance display
+- 🎛️ Customizable dimensions and styling
+
+**Input:**
+```json
+{
+  "cities": [
+    {"x": 0, "y": 0, "name": "Start"},
+    {"x": 5, "y": 3, "name": "Middle"},
+    {"x": 2, "y": 7, "name": "End"}
+  ],
+  "route": [0, 1, 2],
+  "options": {
+    "width": 1000,
+    "height": 800,
+    "showLabels": true,
+    "showDistance": true
+  }
+}
+```
+
+### 5. 🚀 `solve_and_visualize_tsp` **NEW!**
+Solves TSP and generates a beautiful visualization in one step - the ultimate TSP tool!
+
+**Features:**
+- ⚡ One-step solution and visualization
+- 🧠 Automatic algorithm selection (DP vs heuristic)
+- 📊 Detailed solution breakdown
+- 🎨 Professional SVG visualization
+- 📋 Comprehensive route information
+
+**Input:**
+```json
+{
+  "cities": [
+    {"x": 0, "y": 0, "name": "Warehouse"},
+    {"x": 5, "y": 3, "name": "Store A"},
+    {"x": 2, "y": 7, "name": "Store B"},
+    {"x": 8, "y": 1, "name": "Store C"}
+  ],
+  "options": {
+    "width": 800,
+    "height": 600,
+    "showLabels": true,
+    "showDistance": true
+  }
 }
 ```
 
@@ -242,3 +316,29 @@ If you encounter issues:
 - Built with the [Model Context Protocol SDK](https://github.com/modelcontextprotocol/typescript-sdk)
 - Implements classic TSP algorithms adapted for practical use
 - Inspired by the need for accessible optimization tools 
+
+## 🎨 Visualization Features
+
+The visualization system creates professional-quality SVG diagrams with:
+
+### Visual Elements
+- **🔴 Cities**: Red circles with white borders and index numbers
+- **🔵 Route Lines**: Blue lines showing the optimal path
+- **📝 Labels**: City names and visit order numbers
+- **📊 Statistics**: Title with city count and total distance
+- **🎯 Clean Design**: Modern styling with proper spacing and typography
+
+### Customization Options
+- **Canvas Size**: Adjustable width and height (default: 800×600)
+- **Padding**: Configurable margins around the visualization
+- **City Styling**: Customizable radius and colors
+- **Line Styling**: Adjustable stroke width and colors
+- **Label Control**: Toggle city labels and distance display
+- **Responsive Scaling**: Auto-fits any coordinate range
+
+### Example Output
+```svg
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Beautiful TSP visualization with cities, routes, and labels -->
+</svg>
+``` 
