@@ -9,7 +9,11 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { TSPSolver, City, TSPResult } from './tsp-solver.js';
-import { TSPVisualizer, VisualizationOptions } from './visualization.js';
+import { ImageTSPVisualizer, ImageVisualizationOptions } from './image-visualizer.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { exec } from 'child_process';
 
 interface NamedCity extends City {
   name: string;
@@ -33,6 +37,11 @@ class TSPMCPServer {
 
     this.setupToolHandlers();
     this.setupErrorHandling();
+  }
+
+  public async run() {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
   }
 
   private setupErrorHandling(): void {
@@ -143,7 +152,7 @@ class TSPMCPServer {
         },
         {
           name: 'visualize_tsp_route',
-          description: 'Generate an SVG visualization of a TSP route. Cities are shown as red dots, routes as blue lines.',
+          description: 'Generate a PNG image visualization of a TSP route. Creates high-quality images with professional styling.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -182,11 +191,11 @@ class TSPMCPServer {
                 properties: {
                   width: {
                     type: 'number',
-                    description: 'SVG width in pixels (default: 800)'
+                    description: 'Image width in pixels (default: 800)'
                   },
                   height: {
                     type: 'number',
-                    description: 'SVG height in pixels (default: 600)'
+                    description: 'Image height in pixels (default: 600)'
                   },
                   showLabels: {
                     type: 'boolean',
@@ -195,6 +204,12 @@ class TSPMCPServer {
                   showDistance: {
                     type: 'boolean',
                     description: 'Whether to show total distance (default: true)'
+                  },
+                  style: {
+                    type: 'string',
+                    description: 'Visual style theme',
+                    enum: ['modern', 'minimal', 'colorful', 'dark'],
+                    default: 'modern'
                   }
                 }
               }
@@ -204,7 +219,7 @@ class TSPMCPServer {
         },
         {
           name: 'solve_and_visualize_tsp',
-          description: 'Solve TSP and generate an SVG visualization in one step. Returns both the solution and the visualization.',
+          description: 'Solve TSP and generate an instant PNG image visualization with professional styling.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -236,11 +251,11 @@ class TSPMCPServer {
                 properties: {
                   width: {
                     type: 'number',
-                    description: 'SVG width in pixels (default: 800)'
+                    description: 'Width in pixels (default: 800)'
                   },
                   height: {
                     type: 'number',
-                    description: 'SVG height in pixels (default: 600)'
+                    description: 'Height in pixels (default: 600)'
                   },
                   showLabels: {
                     type: 'boolean',
@@ -249,6 +264,12 @@ class TSPMCPServer {
                   showDistance: {
                     type: 'boolean',
                     description: 'Whether to show total distance (default: true)'
+                  },
+                  style: {
+                    type: 'string',
+                    description: 'Visual style theme',
+                    enum: ['modern', 'minimal', 'colorful', 'dark'],
+                    default: 'modern'
                   }
                 }
               }
@@ -295,6 +316,61 @@ class TSPMCPServer {
         );
       }
     });
+  }
+
+  private createSafeOutputDir(): string {
+    try {
+      // Try to create in current working directory first
+      const cwd = process.cwd();
+      const outputDir = path.join(cwd, 'visualizations');
+      
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true, mode: 0o755 });
+      }
+      
+      // Test write access
+      const testFile = path.join(outputDir, 'test-write.tmp');
+      fs.writeFileSync(testFile, 'test');
+      fs.unlinkSync(testFile);
+      
+      return outputDir;
+    } catch (error) {
+      try {
+        // Try user home directory
+        const homeDir = os.homedir();
+        const outputDir = path.join(homeDir, 'tsp-visualizations');
+        
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true, mode: 0o755 });
+        }
+        
+        // Test write access
+        const testFile = path.join(outputDir, 'test-write.tmp');
+        fs.writeFileSync(testFile, 'test');
+        fs.unlinkSync(testFile);
+        
+        return outputDir;
+      } catch (homeError) {
+        try {
+          // Fallback to temp directory
+          const tempDir = os.tmpdir();
+          const outputDir = path.join(tempDir, 'tsp-mcp-visualizations');
+          
+          if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true, mode: 0o755 });
+          }
+          
+          // Test write access
+          const testFile = path.join(outputDir, 'test-write.tmp');
+          fs.writeFileSync(testFile, 'test');
+          fs.unlinkSync(testFile);
+          
+          return outputDir;
+        } catch (tempError) {
+          throw new Error(`Unable to create output directory. CWD: ${error}, Home: ${homeError}, Temp: ${tempError}`);
+        }
+      }
+    }
   }
 
   private async handleSolveTSP(args: any) {
@@ -507,31 +583,80 @@ ${route.map((cityIndex, i) => {
       }
     }
 
-    const visualizer = new TSPVisualizer();
-    const totalDistance = TSPVisualizer.calculateRouteDistance(cities, route);
-    const svgVisualization = visualizer.generateSVG(cities, route, totalDistance, args.options);
+    // Calculate total distance
+    let totalDistance = 0;
+    for (let i = 0; i < route.length; i++) {
+      const from = cities[route[i]];
+      const to = cities[route[(i + 1) % route.length]];
+      totalDistance += Math.sqrt(Math.pow(to.x - from.x, 2) + Math.pow(to.y - from.y, 2));
+    }
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `📊 **TSP Route Visualization**
+    // Generate image visualization
+    try {
+      const imageVisualizer = new ImageTSPVisualizer(args.options);
+      const base64Data = imageVisualizer.generatePNGBase64(cities, route, totalDistance, args.options);
 
-🗺️  Route: ${route.join(' → ')} → ${route[0]}
-📏 Total Distance: ${totalDistance.toFixed(2)} units
-📍 Cities: ${cities.length}
-
-The visualization shows:
-- 🔴 Red circles: Cities with index numbers
-- 🔵 Blue lines: Route connections
-- 📝 Labels: City names and visit order`
-        },
-        {
-          type: 'text',
-          text: svgVisualization
+      const outputDir = this.createSafeOutputDir();
+      
+      const timestamp = Date.now();
+      const imagePath = path.join(outputDir, `tsp-route-${timestamp}.png`);
+      
+      // Convert base64 to buffer and save
+      const imageBuffer = Buffer.from(base64Data, 'base64');
+      fs.writeFileSync(imagePath, imageBuffer);
+      
+      // Open image automatically (macOS)
+      exec(`open "${imagePath}"`, (error) => {
+        if (error) {
+          // Silently fail - don't log to stdout
         }
-      ]
-    };
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `TSP Route Visualization Complete!
+
+Route: ${route.join(' → ')} → ${route[0]}
+Total Distance: ${totalDistance.toFixed(2)} units
+Cities: ${cities.length}
+
+Route Details:
+${route.map((cityIndex, i) => {
+  const city = cities[cityIndex];
+  return `${i + 1}. ${city.name} (${cityIndex})`;
+}).join(' → ')} → ${cities[route[0]].name} (${route[0]})
+
+Image saved: ${imagePath}
+Auto-opened: Image viewer launched
+Styles available: modern, dark, minimal, colorful`
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `TSP Route Data (Visualization failed)
+
+Route: ${route.join(' → ')} → ${route[0]}
+Total Distance: ${totalDistance.toFixed(2)} units
+Cities: ${cities.length}
+
+Route Details:
+${route.map((cityIndex, i) => {
+  const city = cities[cityIndex];
+  return `${i + 1}. ${city.name} (${cityIndex})`;
+}).join(' → ')} → ${cities[route[0]].name} (${route[0]})
+
+Visualization Error: ${error}
+Note: Route data available, but visualization failed.`
+          }
+        ]
+      };
+    }
   }
 
   private async handleSolveAndVisualizeTSP(args: any) {
@@ -566,46 +691,80 @@ The visualization shows:
     const solver = new TSPSolver(cities);
     const result = solver.solve();
 
-    const visualizer = new TSPVisualizer();
-    const svgVisualization = visualizer.generateSVG(cities, result.route, result.totalDistance, args.options);
+    // Generate instant image file (SVG HTML method removed)
+    try {
+      const imageVisualizer = new ImageTSPVisualizer(args.options);
+      const base64Data = imageVisualizer.generatePNGBase64(cities, result.route, result.totalDistance, args.options);
+      const outputDir = this.createSafeOutputDir();
+      
+      const timestamp = Date.now();
+      const imagePath = path.join(outputDir, `tsp-solution-${timestamp}.png`);
+      
+      // Convert base64 to buffer and save
+      const imageBuffer = Buffer.from(base64Data, 'base64');
+      fs.writeFileSync(imagePath, imageBuffer);
+      
+      // Open image automatically (macOS)
+      exec(`open "${imagePath}"`, (error) => {
+        if (error) {
+          // Silently fail - don't log to stdout
+        }
+      });
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `🎯 **TSP Solution Found!**
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `TSP Solution with Visualization Complete!
 
-📍 Number of cities: ${cities.length}
-🗺️  Optimal route: ${result.route.join(' → ')} → ${result.route[0]}
-📏 Total distance: ${result.totalDistance.toFixed(2)} units
+Number of cities: ${cities.length}
+Optimal route: ${result.route.join(' → ')} → ${result.route[0]}
+Total distance: ${result.totalDistance.toFixed(2)} units
+Algorithm used: ${cities.length <= 10 ? 'Dynamic Programming (optimal solution)' : 'Nearest Neighbor + 2-opt (high-quality heuristic)'}
 
-🏙️ **Route Details:**
+Route Details:
 ${result.route.map((cityIndex, i) => {
   const city = cities[cityIndex];
   return `${i + 1}. ${city.name}: (${city.x}, ${city.y})`;
 }).join('\n')}
 
-🧠 **Algorithm used:** ${cities.length <= 10 ? 'Dynamic Programming (optimal solution)' : 'Nearest Neighbor + 2-opt (high-quality heuristic)'}
+Image saved: ${imagePath}
+Auto-opened: Image viewer launched
+Styles available: modern, dark, minimal, colorful`
+          }
+        ]
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `TSP Solution Found (Visualization failed)
 
-📊 **Visualization below shows:**
-- 🔴 Red circles: Cities with index numbers  
-- 🔵 Blue lines: Optimal route connections
-- 📝 Labels: City names and visit order`
-        },
-        {
-          type: 'text',
-          text: svgVisualization
-        }
-      ]
-    };
-  }
+Number of cities: ${cities.length}
+Optimal route: ${result.route.join(' → ')} → ${result.route[0]}
+Total distance: ${result.totalDistance.toFixed(2)} units
 
-  async run(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('TSP MCP server running on stdio');
+Route Details:
+${result.route.map((cityIndex, i) => {
+  const city = cities[cityIndex];
+  return `${i + 1}. ${city.name}: (${city.x}, ${city.y})`;
+}).join('\n')}
+
+Visualization Error: ${errorMessage}
+Note: TSP solution computed successfully, but image generation failed.`
+          }
+        ]
+      };
+    }
   }
 }
 
-const server = new TSPMCPServer();
-server.run().catch(console.error); 
+// Start the MCP server
+async function main() {
+  const server = new TSPMCPServer();
+  await server.run();
+}
+
+main().catch(console.error);
